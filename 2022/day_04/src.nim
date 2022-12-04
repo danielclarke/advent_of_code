@@ -14,17 +14,15 @@ func contained[T](a, b: set[T]): bool {.inline.}=
   let common = a * b
   a <= common or b <= common
 
-func rangeContained(sr: (SectionRange, SectionRange)): bool =
-  let (a, b) = sr
-  let left = {a.first .. a.last}
-  let right = {b.first .. b.last}
-  contained(left, right)
+template rangeCmp(fname) =
+  proc fname(sr: (SectionRange, SectionRange)): bool =
+    let (a, b) = sr
+    let left = {a.first .. a.last}
+    let right = {b.first .. b.last}
+    fname(left, right)
 
-func rangeOverlap(sr: (SectionRange, SectionRange)): bool =
-  let (a, b) = sr
-  let left = {a.first .. a.last}
-  let right = {b.first .. b.last}
-  overlap(left, right)
+rangeCmp(overlap)
+rangeCmp(contained)
 
 iterator sectionRanges(fname: string): (SectionRange, SectionRange) =
   for line in fname.lines:
@@ -33,8 +31,8 @@ iterator sectionRanges(fname: string): (SectionRange, SectionRange) =
       yield ((a, b), (u, v))
 
 proc main() =
-  echo "2022/day_04/data/input.txt".sectionRanges.toSeq.map(rangeContained).filter(ident).len
-  echo "2022/day_04/data/input.txt".sectionRanges.toSeq.map(rangeOverlap).filter(ident).len
+  echo "2022/day_04/data/input.txt".sectionRanges.toSeq.map(contained).filter(ident).len
+  echo "2022/day_04/data/input.txt".sectionRanges.toSeq.map(overlap).filter(ident).len
 
 when isMainModule:
   main()
