@@ -11,13 +11,16 @@ proc insert[T](cb: var CircularBuffer[T], v: T) =
   cb.buffer[cb.index] = v
   cb.index = (cb.index + 1) mod cb.size
 
+func values[T](cb: CircularBuffer[T]): seq[T] =
+  cb.buffer
+
 proc markerStart(s: string, markerLength: int): int =
   var cb = newCircularBuffer[char](markerLength)
   for i, c in s.pairs:
     cb.insert(c)
     if i >= markerLength - 1:
       var s: set[range['a' .. 'z']]
-      for c in cb.buffer:
+      for c in cb.values:
         s.incl c
       if s.len == markerLength:
         return i + 1
