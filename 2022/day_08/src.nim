@@ -102,18 +102,27 @@ proc views(grid: Grid): seq[seq[int]] =
       result[i][j] *= viewTop(j, i, grid)
       result[i][j] *= viewBottom(j, i, grid)
 
-proc main() =
-  var grid = Grid(data: newSeq[seq[int]](0))
-  grid.loadFromFile("2022/day_08/data/input.txt")
+proc partOne(grid: Grid) =
   echo grid.visibleFrom(visibleFromLeft)
   echo grid.visibleFrom(visibleFromRight)
   echo grid.visibleFrom(visibleFromTop)
   echo grid.visibleFrom(visibleFromBottom)
   echo visibleCount(grid)
+
+proc partTwo(grid: Grid) =
   var bestView = 0
   for row in grid.views():
     bestView = max(bestView, max(row))
   echo bestView
+
+proc main() =
+  var grid = Grid(data: newSeq[seq[int]](0))
+  grid.loadFromFile("2022/day_08/data/input.txt")
+
+  partOne(grid)
+  partTwo(grid)
+
+
 
 when isMainModule:
   main()
