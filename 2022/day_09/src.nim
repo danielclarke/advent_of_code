@@ -1,13 +1,7 @@
-import std/[sets, strformat, strscans]
+import std/[sets, strscans]
 import vec2
 
 type
-  Direction = enum
-    D = 'D'
-    L = 'L'
-    R = 'R'
-    U = 'U'
-
   Rope = seq[Vec2]
 
 proc newRope(n: Natural): Rope =
