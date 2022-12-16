@@ -122,7 +122,7 @@ proc main() =
   var packets = newSeq[Packet](0)
   let dividerTwo = Packet(kind: pkPacket, packet: @[Packet(kind: pkPacket, packet: @[Packet(kind: pkValue, value: 2)])])
   let dividerSix = Packet(kind: pkPacket, packet: @[Packet(kind: pkPacket, packet: @[Packet(kind: pkValue, value: 6)])])
-  
+
   for (pkLeft, pkRight) in pairs "2022/day_13/data/input.txt":
     packets.add(pkLeft)
     packets.add(pkRight)
@@ -132,8 +132,13 @@ proc main() =
     if c <= 0:
       sum += count
   
+  # part 1
+
   echo sum
 
+
+  # part 2
+  
   var multipland = 1  
 
   packets.add(dividerTwo)
