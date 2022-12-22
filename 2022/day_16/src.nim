@@ -1,5 +1,5 @@
 # import nimprof
-import std/[strutils, strformat, pegs, algorithm, heapqueue]
+import std/[strutils, strformat, pegs, heapqueue]
 
 type
   Valve = object
@@ -13,6 +13,7 @@ type
   Graph = object
     sourceIndex: int
     vertices: seq[Valve]
+    positiveFlowVertices: seq[Valve]
     shortestPaths: seq[int]
 
   Path = object
@@ -38,8 +39,15 @@ iterator adjacent(v: Valve): int =
   for i in 0 ..< v.numAdj:
     yield v.adj[i]
 
-proc `<`(a, b: Path): bool = 
-  (a.releasePotential + a.releasedPressure) >= (b.releasePotential + b.releasedPressure)
+proc `<`(a, b: Path): bool =
+  (a.releasePotential + a.releasedPressure) >= (b.releasePotential +
+      b.releasedPressure)
+
+proc `<`(a, b: (Path, Path)): bool =
+  a[0].releasePotential + a[0].releasedPressure +
+  a[1].releasePotential + a[1].releasedPressure >=
+  b[0].releasePotential + b[0].releasedPressure +
+  b[1].releasePotential + b[1].releasedPressure
 
 proc `<`(a, b: seq[int]): bool =
   a.len < b.len
@@ -53,6 +61,9 @@ proc name(g: Graph; vIndex: int): string =
   for v in g.vertices:
     if v.index == vIndex:
       return v.name
+
+proc pathLen(g: Graph; fromIndex, toIndex: int): int {.inline.} =
+  g.shortestPaths[fromIndex * g.vertices.len + toIndex]
 
 proc newGraph(): Graph =
   Graph(vertices: newSeq[Valve](0))
@@ -82,16 +93,11 @@ proc `$`(g: Graph): string =
 
   for i, v in g.vertices.pairs:
     for j, u in g.vertices.pairs:
-      result.add(fmt"{v.name} -> {u.name}: {g.shortestPaths[i * g.vertices.len + j]}")
+      result.add(fmt"{v.name} -> {u.name}: {g.pathLen(i, j)}")
       result.add('\n')
 
 proc valveOpen(p: Path; v: int): bool =
   p.mOpenValves[v]
-  # {v} <= p.ov
-  # for ov in p.openValves:
-  #   if v == ov:
-  #     return true
-  # return false
 
 proc toString(g: Graph; p: Path): string =
   result.add(fmt"minutesRemaining: {p.minutesRemaining}")
@@ -125,7 +131,7 @@ proc toString(g: Graph; p: Path): string =
   result[^2] = ']'
   result[^1] = ' '
 
-proc shortestPath(g: Graph; f, t: int): seq[int] =
+proc findShortestPath(g: Graph; f, t: int): seq[int] =
   var paths = initHeapQueue[seq[int]]()
   paths.push(@[f])
   while paths.len > 0:
@@ -149,7 +155,13 @@ proc setShortestPaths(graph: var Graph) =
     if v.index == graph.sourceIndex or v.flowRate > 0:
       for u in graph.vertices:
         if v != u and (u.index == graph.sourceIndex or u.flowRate > 0):
-          graph.shortestPaths[v.index * graph.vertices.len + u.index] = graph.shortestPath(v.index, u.index).len - 1
+          graph.shortestPaths[v.index * graph.vertices.len +
+              u.index] = graph.findShortestPath(v.index, u.index).len - 1
+
+proc setPositiveFlowValves(graph: var Graph) =
+  for v in graph.vertices:
+    if v.flowRate > 0:
+      graph.positiveFlowVertices.add(v)
 
 proc addAdj(v: var Valve; i: int; dist: int) =
   v.adj[v.numAdj] = i
@@ -168,7 +180,7 @@ proc setFlowRate(g: var Graph; name: string; flowRate: int) =
   for v in g.vertices.mitems:
     if v.name == name:
       v.flowRate = flowRate
-      return 
+      return
 
 proc addEdge(g: var Graph; fv, tv: string; dist: int) =
   let fIndex = g.index(fv)
@@ -195,6 +207,7 @@ proc parseGraph(fname: string): Graph =
       else:
         raise newException(ValueError, line)
   result.setShortestPaths()
+  result.setPositiveFlowValves()
 
 proc openValve(p: var Path; v: int) =
   p.mOpenValves[v] = true
@@ -205,29 +218,70 @@ proc addMove(p: var Path; v: int) =
   p.mMoves[p.numMoves] = v
   inc p.numMoves
 
-proc releasesRemaining(g: Graph; p: Path): seq[Path] =
+proc nextPaths(g: Graph; p: Path): seq[Path] =
   result = newSeq[Path](0)
-  for v in g.vertices:
-    if not p.valveOpen(v.index) and v.flowRate > 0:
+  for v in g.positiveFlowVertices:
+    if not p.valveOpen(v.index):
       var path = p
-      let sp = g.shortestPaths[p.currentIndex * g.vertices.len + v.index]
-      path.currentIndex = v.index
+      let sp = g.pathLen(p.currentIndex, v.index)
       path.minutesRemaining -= sp
       if path.minutesRemaining >= 0:
+        path.currentIndex = v.index
         path.addMove(v.index)
         path.openValve(v.index)
         path.releasedPressure += path.minutesRemaining * v.flowRate
         result.add(path)
 
-proc potentialReleases(g: Graph; p: Path): int =
-  result = 0
-  for v in g.vertices:
-    if not p.valveOpen(v.index) and v.flowRate > 0:
-      result += max(0, (p.minutesRemaining - g.shortestPaths[p.currentIndex * g.vertices.len + v.index]) * v.flowRate)
+proc nextNonOverlappingPaths(g: Graph; myPath, elePath: Path): seq[(Path, Path)] =
+  result = newSeq[(Path, Path)](0)
+  for v in g.positiveFlowVertices:
+    for u in g.positiveFlowVertices:
+      if v != u and
+        not myPath.valveOpen(v.index) and
+        not elePath.valveOpen(v.index) and
+        not myPath.valveOpen(u.index) and
+        not elePath.valveOpen(u.index):
 
-proc partOne(g: Graph): int =
+        var nextMyPath = myPath
+        let mySp = g.pathLen(myPath.currentIndex, v.index)
+        if nextMyPath.minutesRemaining - mySp >= 0:
+          nextMyPath.minutesRemaining -= mySp
+          nextMyPath.currentIndex = v.index
+          nextMyPath.addMove(v.index)
+          nextMyPath.openValve(v.index)
+          nextMyPath.releasedPressure += nextMyPath.minutesRemaining * v.flowRate
+
+        var nextElePath = elePath
+        let eleSp = g.pathLen(elePath.currentIndex, u.index)
+        if nextElePath.minutesRemaining - eleSp >= 0:
+          nextElePath.minutesRemaining -= eleSp
+          nextElePath.currentIndex = u.index
+          nextElePath.addMove(u.index)
+          nextElePath.openValve(u.index)
+          nextElePath.releasedPressure += nextElePath.minutesRemaining * u.flowRate
+
+        if nextMyPath != myPath or nextElePath != elePath:
+          result.add((nextMyPath, nextElePath))
+
+proc potentialReleases(g: Graph; p: Path): int =
+  for v in g.positiveFlowVertices:
+    if not p.valveOpen(v.index) and v.flowRate > 0:
+      result += max(0, (p.minutesRemaining - g.pathLen(p.currentIndex,
+          v.index) - 1) * v.flowRate)
+
+proc potentialReleases(g: Graph; p, q: Path): int =
+  for v in g.positiveFlowVertices:
+    if not p.valveOpen(v.index) and not q.valveOpen(v.index) and v.flowRate > 0:
+      result += max(0, (p.minutesRemaining - g.pathLen(p.currentIndex,
+          v.index) - 1) * v.flowRate)
+
+proc isPotentialNextValve(g: Graph; p: Path; v: Valve): bool {.inline.} =
+  not p.valveOpen(v.index) and v.flowRate > 0 and p.minutesRemaining >
+      g.pathLen(p.currentIndex, v.index)
+
+proc partOne(g: Graph; timeLimit: int): Path =
   var paths = initHeapQueue[Path]()
-  var p = Path(minutesRemaining: 30, currentIndex: g.sourceIndex)
+  var p = Path(minutesRemaining: timeLimit, currentIndex: g.sourceIndex)
   p.releasePotential = g.potentialReleases(p)
   paths.push(p)
 
@@ -237,18 +291,48 @@ proc partOne(g: Graph): int =
     block pathCheck:
       for i, v in g.vertices:
         # the valve is closed, has a positive flowRate and we have enough time to get there
-        if not path.valveOpen(v.index) and v.flowRate > 0 and path.minutesRemaining > g.shortestPaths[path.currentIndex * g.vertices.len + v.index]:
+        if g.isPotentialNextValve(path, v):
           break pathCheck
-      return path.releasedPressure
+      return path
 
-    var nextPaths = g.releasesRemaining(path)
+    var nextPaths = g.nextPaths(path)
     for np in nextPaths.mitems:
       np.releasePotential = g.potentialReleases(np)
       paths.push(np)
 
+proc partTwo(g: Graph; timeLimit: int): (Path, Path) =
+  var paths = initHeapQueue[(Path, Path)]()
+  var p = Path(minutesRemaining: timeLimit, currentIndex: g.sourceIndex)
+  p.releasePotential = g.potentialReleases(p)
+  paths.push((p, p))
+
+  while paths.len > 0:
+    let (myPath, elePath) = paths.pop()
+
+    block pathCheck:
+      for i, v in g.vertices:
+        # the valve is closed, has a positive flowRate and we have enough time to get there
+        if (g.isPotentialNextValve(myPath, v) and not elePath.valveOpen(
+            v.index)) or (g.isPotentialNextValve(elePath, v) and
+            not myPath.valveOpen(v.index)):
+          break pathCheck
+      return (myPath, elePath)
+
+    var nextPaths = g.nextNonOverlappingPaths(myPath, elePath)
+    for (nextMyPath, nextElePath) in nextPaths.mitems:
+      nextMyPath.releasePotential = g.potentialReleases(nextMyPath, nextElePath)
+      nextElePath.releasePotential = g.potentialReleases(nextElePath, nextMyPath)
+      paths.push((nextMyPath, nextElePath))
+
 proc main() =
   var graph = parseGraph("2022/day_16/data/input.txt")
-  echo graph.partOne()
+  let p = graph.partOne(30)
+  echo p.releasedPressure
+
+  let (myPath, elePath) = graph.partTwo(26)
+
+  echo myPath.releasedPressure, " ", elePath.releasedPressure, " ",
+      myPath.releasedPressure + elePath.releasedPressure
 
 when isMainModule:
   main()
